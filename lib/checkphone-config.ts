@@ -270,6 +270,8 @@ export type CheckPhoneShoppingProduct = {
   detail: string;
   previewIcon: string;
   tone: CheckPhoneShoppingTone;
+  /** 可选：AI 生成的商品实拍图，存 media-store:// 引用（不存 base64，避免撑爆存档）。 */
+  imageRef?: string;
 };
 
 export type CheckPhoneShoppingCartItem = CheckPhoneShoppingProduct & {
@@ -286,6 +288,8 @@ export type CheckPhoneShoppingOrderItem = {
   detail: string;
   previewIcon: string;
   tone: CheckPhoneShoppingTone;
+  /** 下单时从商品上快照过来的实拍图引用，保证订单里也能看到同一张图。 */
+  imageRef?: string;
 };
 
 export type CheckPhoneShoppingShippingStage = "ordered" | "shipped" | "delivering" | "delivered";
