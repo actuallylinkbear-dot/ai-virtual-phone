@@ -277,9 +277,31 @@ function getImageFrameStyle(width?: number, height?: number): CSSProperties {
   return { aspectRatio: `1 / ${heightRatio.toFixed(4)}` };
 }
 
+/** 去掉封面高亮标记 [[xxx]]，供通知缩略图、搜索等纯文本场景使用。 */
+function stripCoverHighlight(text: string): string {
+  return String(text ?? "").replace(/\[\[([^\]]+)\]\]/g, "$1");
+}
+
 function getXhsPlainText(text: string): string {
   const normalized = normalizeBilingualTextInput(text);
-  return splitBilingualText(normalized)?.original ?? normalized;
+  return stripCoverHighlight(splitBilingualText(normalized)?.original ?? normalized);
+}
+
+/**
+ * 渲染小红书式文字封面：把 [[关键词]] 渲染成红色高亮块，其余按普通文字。
+ * 每段单独走 getXhsPlainText，避免双语标记混进封面。
+ */
+function renderCoverHighlight(text: string) {
+  return String(text ?? "")
+    .split(/(\[\[[^\]]+\]\])/g)
+    .filter(part => part !== "")
+    .map((part, index) => {
+      const highlighted = /^\[\[([^\]]+)\]\]$/.exec(part);
+      if (highlighted) {
+        return <em key={index} className="xhs-cover-hl">{getXhsPlainText(highlighted[1])}</em>;
+      }
+      return <span key={index}>{getXhsPlainText(part)}</span>;
+    });
 }
 
 function getNoteCardVariant(note: Pick<XiaohongshuNote, "body" | "title">): XiaohongshuNoteCardVariant {
@@ -441,16 +463,14 @@ function NoteImage({
       </div>
     );
   }
-  if (note.imageDescription?.trim() && !hideTextImageDescription) {
+  // 小红书式文字封面：标题优先（短钩子），没有标题再退回图说。
+  // 这两者都为空时才用 emoji 兜底。
+  const rawCoverText = note.title?.trim() || note.imageDescription?.trim() || "";
+  if (!hideTextImageDescription && getXhsPlainText(rawCoverText).trim()) {
     return (
       <div className={`cp-xhs-cover cp-xhs-cover--${note.tone} xhs-note-text-image`} style={TEXT_XHS_IMAGE_FRAME_STYLE}>
-        <span>
-          <CheckPhoneBilingualText
-            text={note.imageDescription}
-            tone="xiaohongshu"
-            collapseBilingualTranslation={collapseBilingualTranslation}
-          />
-        </span>
+        <div className="xhs-cover-title">{renderCoverHighlight(rawCoverText)}</div>
+        {note.coverIcon ? <span className="xhs-cover-deco">{note.coverIcon}</span> : null}
       </div>
     );
   }
