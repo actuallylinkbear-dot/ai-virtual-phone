@@ -278,38 +278,73 @@
   border-radius: 0;
 }
 
-.xhs-note-text-image {
-  width: 100%;
-  min-height: 0;
-  padding: 18px;
+/* 小红书式文字封面：大字钩子句 + 关键词红块高亮 + 右下角小图标 */
+.cp-xhs-cover.xhs-note-text-image {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 6px;
+  padding: 13px 12px 11px;
   overflow: hidden;
-  align-items: center;
-  justify-content: center;
+  text-align: left;
 }
 
-.xhs-note-text-image span {
+.xhs-cover-title {
   display: -webkit-box;
+  width: 100%;
   max-width: 100%;
   overflow: hidden;
-  color: rgba(40, 36, 34, 0.72);
-  font-size: calc(13px*var(--app-text-scale,1));
-  font-style: italic;
-  font-weight: 450;
-  line-height: 1.55;
-  text-align: center;
-  white-space: pre-wrap;
-  -webkit-line-clamp: 8;
+  color: #221d1a;
+  font-size: calc(15.5px*var(--app-text-scale,1));
+  font-weight: 800;
+  line-height: 1.38;
+  letter-spacing: 0.2px;
+  word-break: break-word;
+  -webkit-line-clamp: 6;
   -webkit-box-orient: vertical;
 }
 
-.xhs-note-detail-media .xhs-note-text-image {
-  min-height: 0;
-  padding: 26px 24px;
+.xhs-cover-title > span {
+  display: inline;
+  color: inherit;
+  font: inherit;
 }
 
-.xhs-note-detail-media .xhs-note-text-image span {
-  font-size: calc(15px*var(--app-text-scale,1));
+/* 关键词高亮块（参考小红书封面上的红色色块） */
+.xhs-cover-hl {
+  display: inline;
+  margin: 0 1px;
+  padding: 0 4px;
+  border-radius: 5px;
+  background: #ff2442;
+  color: #ffffff;
+  font-style: normal;
+  font-weight: inherit;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+.xhs-cover-deco {
+  margin-top: auto;
+  align-self: flex-end;
+  font-size: calc(24px*var(--app-text-scale,1));
+  line-height: 1;
+  opacity: 0.9;
+}
+
+.xhs-note-detail-media .xhs-note-text-image {
+  gap: 10px;
+  padding: 26px 24px 20px;
+}
+
+.xhs-note-detail-media .xhs-cover-title {
+  font-size: calc(21px*var(--app-text-scale,1));
   -webkit-line-clamp: 10;
+}
+
+.xhs-note-detail-media .xhs-cover-deco {
+  font-size: calc(34px*var(--app-text-scale,1));
 }
 
 .xhs-note-detail-media .cp-xhs-cover-icon {
