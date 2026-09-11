@@ -464,13 +464,12 @@ function NoteImage({
     );
   }
   // 小红书式文字封面：标题优先（短钩子），没有标题再退回图说。
-  // 这两者都为空时才用 emoji 兜底。
+  // 这两者都为空时才用 emoji 兜底。封面内不再叠 icon，避免抢文字版面。
   const rawCoverText = note.title?.trim() || note.imageDescription?.trim() || "";
   if (!hideTextImageDescription && getXhsPlainText(rawCoverText).trim()) {
     return (
       <div className={`cp-xhs-cover cp-xhs-cover--${note.tone} xhs-note-text-image`} style={TEXT_XHS_IMAGE_FRAME_STYLE}>
         <div className="xhs-cover-title">{renderCoverHighlight(rawCoverText)}</div>
-        {note.coverIcon ? <span className="xhs-cover-deco">{note.coverIcon}</span> : null}
       </div>
     );
   }
