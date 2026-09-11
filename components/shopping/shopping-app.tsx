@@ -16,6 +16,7 @@ import {
   RefreshCw,
   Search,
   ShoppingCart,
+  Sparkles,
   Star,
   Trash2,
   Truck,
@@ -46,6 +47,8 @@ import {
   type ShoppingPaymentStatus,
 } from "@/lib/shopping-payment-request";
 import { createDefaultShoppingState, loadShoppingState, saveShoppingState, SHOPPING_STATE_UPDATED_EVENT } from "@/lib/shopping-storage";
+import { generateShoppingProductImage } from "@/lib/shopping-image";
+import { loadMediaObjectUrl } from "@/lib/media-cache-storage";
 import type { ShoppingCartItem, ShoppingCategory, ShoppingOrder, ShoppingProduct, ShoppingShippingEvent, ShoppingState } from "@/lib/shopping-types";
 import {
   formatWalletAmount,
@@ -305,6 +308,7 @@ function toProductDetail(
     tone: item.tone,
     quantityLabel: "quantityLabel" in item ? item.quantityLabel : defaults?.quantityLabel,
     detailLabel: defaults?.detailLabel ?? "Description",
+    ...(item.imageRef ? { imageRef: item.imageRef } : {}),
   };
 }
 
@@ -319,6 +323,7 @@ function baseProduct(product: ShoppingProductDetail | ShoppingProduct): Shopping
     detail: product.detail,
     previewIcon: product.previewIcon,
     tone: product.tone,
+    ...(product.imageRef ? { imageRef: product.imageRef } : {}),
   };
 }
 
@@ -388,6 +393,7 @@ function buildOrderFromCart(
       detail: item.detail,
       previewIcon: item.previewIcon,
       tone: item.tone,
+      ...(item.imageRef ? { imageRef: item.imageRef } : {}),
     })),
   };
 }
@@ -434,6 +440,11 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
   const [paymentError, setPaymentError] = useState<string | null>(null);
   const [blackMarketOpen, setBlackMarketOpen] = useState(false);
   const [blackMarketTransition, setBlackMarketTransition] = useState(false);
+  const [productImageUrls, setProductImageUrls] = useState<Record<string, string>>({});
+  const [generatingImageIds, setGeneratingImageIds] = useState<string[]>([]);
+  const [imageError, setImageError] = useState<string | null>(null);
+  const resolvedImageUrlsRef = useRef<Map<string, string>>(new Map());
+  const productImageObjectUrlsRef = useRef<string[]>([]);
   const cartFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cartPulseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const blackMarketTransitionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -504,8 +515,109 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
     return () => window.clearInterval(timer);
   }, [state.orders.length]);
 
+  // 组件卸载时释放本组件创建的 object URL，避免反复生成商品图后累积泄漏。
+  useEffect(() => () => {
+    productImageObjectUrlsRef.current.forEach(url => URL.revokeObjectURL(url));
+    productImageObjectUrlsRef.current = [];
+    resolvedImageUrlsRef.current.clear();
+  }, []);
+
+  // 把商品上的 media-store 引用解析成可显示的 object URL。
+  // 图片本体存在媒体库里，商品记录里只留一个短引用，所以这里按需解析、解析过的不重复处理。
+  useEffect(() => {
+    const refs = new Map<string, string>();
+    const collect = (item: { id?: string; imageRef?: string } | null | undefined) => {
+      if (item?.id && item.imageRef) refs.set(item.id, item.imageRef);
+    };
+    state.catalog.categories.forEach(category => category.items.forEach(collect));
+    state.catalog.recommendations.forEach(collect);
+    state.searchResult?.items.forEach(collect);
+    state.savedItems.forEach(collect);
+    state.cartItems.forEach(collect);
+    state.orders.forEach(order => order.items.forEach(collect));
+
+    const pending = [...refs.entries()].filter(([id]) => !resolvedImageUrlsRef.current.has(id));
+    if (pending.length === 0) return;
+
+    let cancelled = false;
+    (async () => {
+      let changed = false;
+      for (const [id, ref] of pending) {
+        try {
+          const url = await loadMediaObjectUrl(ref);
+          if (!url || cancelled) continue;
+          resolvedImageUrlsRef.current.set(id, url);
+          productImageObjectUrlsRef.current.push(url);
+          changed = true;
+        } catch {
+          // 引用的图片可能已被清理：保留 emoji 兜底，不打断渲染。
+        }
+      }
+      if (cancelled || !changed) return;
+      setProductImageUrls(Object.fromEntries(resolvedImageUrlsRef.current));
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [state]);
+
   function persist(updater: (current: ShoppingState) => ShoppingState) {
     setState(current => saveShoppingState(updater(current)));
+  }
+
+  /** 把生成好的图片引用写回所有可能持有这件商品的位置（商城、搜索、收藏、购物车、订单）。 */
+  function patchProductImage(productId: string, imageRef: string) {
+    const patch = <T extends { id: string }>(item: T): T =>
+      item.id === productId ? { ...item, imageRef } : item;
+    persist(current => ({
+      ...current,
+      catalog: {
+        ...current.catalog,
+        categories: current.catalog.categories.map(category => ({
+          ...category,
+          items: category.items.map(patch),
+        })),
+        recommendations: current.catalog.recommendations.map(patch),
+      },
+      searchResult: current.searchResult
+        ? { ...current.searchResult, items: current.searchResult.items.map(patch) }
+        : current.searchResult,
+      savedItems: current.savedItems.map(patch),
+      cartItems: current.cartItems.map(patch),
+      orders: current.orders.map(order => ({
+        ...order,
+        items: order.items.map(patch),
+      })),
+    }));
+  }
+
+  async function generateProductImage(
+    item: ShoppingProduct | ShoppingCartItem | ShoppingOrder["items"][number],
+  ) {
+    if (generatingImageIds.includes(item.id)) return;
+    setImageError(null);
+    setGeneratingImageIds(current => [...current, item.id]);
+    try {
+      const result = await generateShoppingProductImage({
+        product: {
+          title: item.title,
+          merchantLabel: item.merchantLabel,
+          tagLabel: "tagLabel" in item ? item.tagLabel : undefined,
+          subtitle: item.subtitle,
+          detail: item.detail,
+        },
+        variant: item.imageRef ? 1 : 0,
+      });
+      patchProductImage(item.id, result.imageRef);
+      resolvedImageUrlsRef.current.set(item.id, result.dataUrl);
+      productImageObjectUrlsRef.current.push(result.dataUrl);
+      setProductImageUrls(Object.fromEntries(resolvedImageUrlsRef.current));
+    } catch (err) {
+      setImageError(err instanceof Error ? err.message : "生成商品图失败");
+    } finally {
+      setGeneratingImageIds(current => current.filter(id => id !== item.id));
+    }
   }
 
   const activeOrder = useMemo(
@@ -1016,6 +1128,38 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
 
   const selectedProductRecentlyAdded = Boolean(selectedProduct && recentlyAddedProductId === selectedProduct.id);
 
+  /** 商品配图：生成过实拍图就用图，否则退回原来的 emoji 图标。 */
+  function ProductThumb({ item, size, iconFontSize }: {
+    item: { id: string; previewIcon: string };
+    size: { width?: string; height: string | number; borderRadius?: string };
+    iconFontSize: string;
+  }) {
+    const url = productImageUrls[item.id];
+    return (
+      <div style={{
+        width: size.width ?? "100%",
+        height: size.height,
+        background: "#f5f5f5",
+        borderRadius: size.borderRadius ?? "12px",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontSize: iconFontSize,
+        flexShrink: 0,
+        overflow: "hidden",
+      }}>
+        {url ? (
+          <img
+            src={url}
+            alt=""
+            loading="lazy"
+            style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+          />
+        ) : item.previewIcon}
+      </div>
+    );
+  }
+
   function ProductCard({ item, compact = false }: { item: ShoppingProduct; compact?: boolean }) {
     const isSaved = savedIds.has(item.id);
     const inCart = cartIds.has(item.id);
@@ -1073,8 +1217,12 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
         >
           <Heart size={15} fill={isSaved ? "white" : "none"} />
         </button>
-        <div style={{ width: "100%", height: compact ? "92px" : "120px", background: "#f5f5f5", borderRadius: "12px", marginBottom: "12px", display: "flex", alignItems: "center", justifyContent: "center", fontSize: compact ? "30px" : "34px" }}>
-          {item.previewIcon}
+        <div style={{ marginBottom: "12px" }}>
+          <ProductThumb
+            item={item}
+            size={{ height: compact ? "92px" : "120px" }}
+            iconFontSize={compact ? "30px" : "34px"}
+          />
         </div>
         <strong style={{ fontSize: "calc(13px*var(--app-text-scale,1))", color: "#222", fontWeight: 600, marginBottom: "4px", display: "block", width: "100%", minWidth: 0 }}>
           {renderShoppingCardText(item.title)}
@@ -1345,9 +1493,11 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
                           tabIndex={0}
                           style={{ width: "100%", minWidth: 0, maxWidth: "100%", boxSizing: "border-box", background: "#fff", borderRadius: "16px", padding: "16px", display: "flex", alignItems: "center", border: "none", boxShadow: "0 4px 20px rgba(0,0,0,0.03)", gap: "16px", textAlign: "left", cursor: "pointer" }}
                         >
-                          <div style={{ width: "80px", height: "80px", background: "#f5f5f5", borderRadius: "12px", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "calc(36px*var(--app-text-scale,1))", flexShrink: 0 }}>
-                            {item.previewIcon}
-                          </div>
+                          <ProductThumb
+                            item={item}
+                            size={{ width: "80px", height: "80px" }}
+                            iconFontSize="calc(36px*var(--app-text-scale,1))"
+                          />
                           <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", justifyContent: "center" }}>
                             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", minWidth: 0, gap: "8px" }}>
                               <strong style={{ flex: "1 1 0", fontSize: "calc(13px*var(--app-text-scale,1))", color: "#222", fontWeight: 600, display: "block", minWidth: 0 }}>{renderShoppingCardText(item.title)}</strong>
@@ -1442,9 +1592,17 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
                           <span style={{ fontSize: "calc(12px*var(--app-text-scale,1))", color: shipping.statusLabel === "已到货" ? "#16a34a" : "#ff6b00", fontWeight: 500 }}>{shipping.statusLabel}</span>
                         </div>
                         <div style={{ display: "flex", gap: "10px", width: "100%", alignItems: "stretch" }}>
-                          <div style={{ width: "56px", height: "56px", background: "#f5f5f5", borderRadius: "12px", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "calc(24px*var(--app-text-scale,1))", flexShrink: 0 }}>
-                            {order.items[0]?.previewIcon || "□"}
-                          </div>
+                          {order.items[0] ? (
+                            <ProductThumb
+                              item={order.items[0]}
+                              size={{ width: "56px", height: "56px" }}
+                              iconFontSize="calc(24px*var(--app-text-scale,1))"
+                            />
+                          ) : (
+                            <div style={{ width: "56px", height: "56px", background: "#f5f5f5", borderRadius: "12px", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "calc(24px*var(--app-text-scale,1))", flexShrink: 0 }}>
+                              □
+                            </div>
+                          )}
                           <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", justifyContent: "space-between", minHeight: "56px" }}>
                             <div style={{ display: "flex", flexDirection: "column", transform: "translateY(10px)" }}>
                               <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
@@ -1548,9 +1706,53 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
                 <Heart size={17} fill={savedIds.has(selectedProduct.id) ? "white" : "none"} />
               </button>
             </header>
-            <div style={{ position: "relative", width: "100%", height: "220px", background: "#f8f9fa", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "calc(72px*var(--app-text-scale,1))" }}>
-              {selectedProduct.previewIcon}
+            <div style={{ position: "relative", width: "100%", height: "220px" }}>
+              <ProductThumb
+                item={selectedProduct}
+                size={{ height: "220px", borderRadius: "0" }}
+                iconFontSize="calc(72px*var(--app-text-scale,1))"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  void generateProductImage(selectedProduct);
+                }}
+                disabled={generatingImageIds.includes(selectedProduct.id)}
+                style={{
+                  position: "absolute",
+                  right: "16px",
+                  bottom: "14px",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  padding: "9px 14px",
+                  borderRadius: "999px",
+                  border: "1px solid rgba(0,0,0,0.06)",
+                  background: generatingImageIds.includes(selectedProduct.id) ? "rgba(255,255,255,0.86)" : "#fff",
+                  color: "#333",
+                  fontSize: "calc(11.5px*var(--app-text-scale,1))",
+                  fontWeight: 600,
+                  boxShadow: "0 6px 18px rgba(0,0,0,0.12)",
+                  cursor: generatingImageIds.includes(selectedProduct.id) ? "default" : "pointer",
+                }}
+              >
+                {generatingImageIds.includes(selectedProduct.id) ? (
+                  <RefreshCw size={13} strokeWidth={2.6} className="cp-spin" />
+                ) : (
+                  <Sparkles size={13} strokeWidth={2.4} />
+                )}
+                {generatingImageIds.includes(selectedProduct.id)
+                  ? "生成中…"
+                  : selectedProduct.imageRef
+                    ? "换一版图"
+                    : "生成实物图"}
+              </button>
             </div>
+            {imageError ? (
+              <div style={{ margin: "12px 24px 0", padding: "10px 12px", borderRadius: "12px", background: "#fff4f4", border: "1px solid #ffd9d9", color: "#b42318", fontSize: "calc(11.5px*var(--app-text-scale,1))", lineHeight: 1.6 }}>
+                {imageError}
+              </div>
+            ) : null}
 
             <div style={{ padding: "22px 24px 34px", flex: 1, display: "flex", flexDirection: "column" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "6px" }}>
@@ -1676,9 +1878,11 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
                     onClick={() => openProduct(item, { tagLabel: activeOrderShipping?.statusLabel ?? activeOrder.statusLabel })}
                     style={{ background: "#fff", borderRadius: "16px", padding: "12px", display: "flex", alignItems: "flex-start", border: "none", boxShadow: "0 2px 10px rgba(0,0,0,0.02)", gap: "12px", textAlign: "left" }}
                   >
-                    <div style={{ width: "60px", height: "60px", background: "#f5f5f5", borderRadius: "10px", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "calc(28px*var(--app-text-scale,1))", flexShrink: 0 }}>
-                      {item.previewIcon}
-                    </div>
+                    <ProductThumb
+                      item={item}
+                      size={{ width: "60px", height: "60px", borderRadius: "10px" }}
+                      iconFontSize="calc(28px*var(--app-text-scale,1))"
+                    />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <strong style={{ fontSize: "calc(13px*var(--app-text-scale,1))", color: "#222", fontWeight: 600, display: "block", lineHeight: 1.32, overflow: "visible", whiteSpace: "normal" }}><CheckPhoneBilingualText text={item.title} tone="shopping" /></strong>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "4px" }}>

@@ -49,6 +49,7 @@ function normalizeProduct(value: unknown): ShoppingState["catalog"]["recommendat
   if (!id || !title || !merchantLabel || !priceLabel || !previewIcon) return null;
   const subtitle = cleanText(record.subtitle, 400);
   const detail = cleanText(record.detail, 1200);
+  const imageRef = cleanText(record.imageRef, 200);
   return {
     id,
     title,
@@ -59,6 +60,7 @@ function normalizeProduct(value: unknown): ShoppingState["catalog"]["recommendat
     detail: detail || subtitle || title,
     previewIcon,
     tone,
+    ...(imageRef ? { imageRef } : {}),
   };
 }
 
