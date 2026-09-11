@@ -315,6 +315,18 @@ function getIconImageFrameStyle(note: Pick<XiaohongshuNote, "body" | "title">): 
   return ICON_XHS_IMAGE_FRAME_STYLES[getNoteCardVariant(note)];
 }
 
+/**
+ * 封面是否已经承担了标题文案。
+ * 用于卡片正文去重：封面和正文同时显示同一句标题会造成重复。
+ * 判断条件与 NoteImage 的文字封面分支保持一致——有真实图片时封面是图，
+ * 标题照常在正文里显示。
+ */
+function coverUsesTitle(note: XiaohongshuNote, hideTextImageDescription?: boolean): boolean {
+  if (hideTextImageDescription) return false;
+  if (note.imageAssetId) return false;
+  return Boolean(getXhsPlainText(note.title ?? "").trim());
+}
+
 function noteHasUserComment(note: XiaohongshuNote): boolean {
   return note.comments.some(comment => comment.authorType === "user");
 }
@@ -496,6 +508,8 @@ function NoteCard({
   collapseBilingualTranslation: boolean;
 }) {
   const variant = getNoteCardVariant(note);
+  // 标题已经做成封面时，正文不再重复显示标题。
+  const titleShownInCover = coverUsesTitle(note, hideTextImageDescription);
   return (
     <button type="button" className={`cp-xhs-note-card cp-xhs-note-card--${variant}`} onClick={onOpen}>
       <NoteImage
@@ -505,13 +519,15 @@ function NoteCard({
         collapseBilingualTranslation={collapseBilingualTranslation}
       />
       <div className="cp-xhs-note-body">
-        <strong>
-          <CheckPhoneBilingualText
-            text={note.title}
-            tone="xiaohongshu"
-            collapseBilingualTranslation={collapseBilingualTranslation}
-          />
-        </strong>
+        {titleShownInCover ? null : (
+          <strong>
+            <CheckPhoneBilingualText
+              text={note.title}
+              tone="xiaohongshu"
+              collapseBilingualTranslation={collapseBilingualTranslation}
+            />
+          </strong>
+        )}
         <p>
           <CheckPhoneBilingualText
             text={note.body}
@@ -2718,13 +2734,16 @@ export function XiaohongshuApp({ onClose, onNotice, visible = true, onIdle, onBu
                 />
               </div>
               <div className="cp-xhs-note-detail-card">
-                <h3>
-                  <CheckPhoneBilingualText
-                    text={selectedNote.title}
-                    tone="xiaohongshu"
-                    collapseBilingualTranslation={state.settings.collapseBilingualTranslation}
-                  />
-                </h3>
+                {/* 标题已经做成封面时，这里不再重复一遍。 */}
+                {coverUsesTitle(selectedNote) ? null : (
+                  <h3>
+                    <CheckPhoneBilingualText
+                      text={selectedNote.title}
+                      tone="xiaohongshu"
+                      collapseBilingualTranslation={state.settings.collapseBilingualTranslation}
+                    />
+                  </h3>
+                )}
                 <p className="cp-xhs-note-detail-body">
                   <CheckPhoneBilingualText
                     text={selectedNote.body}
