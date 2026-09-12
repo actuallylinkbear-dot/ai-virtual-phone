@@ -533,6 +533,19 @@ function buildOpenAICompatibleRequest(
                 }
                 return assistantMessage;
             }
+            // DeepSeek 思考模式：请求携带 tools 时，历史轮次的 reasoning_content 必须全部回传，
+            // 否则 400（The `reasoning_content` in the thinking mode must be passed back to the API）。
+            // 此前只在「本条助手消息带 tool_calls」的分支里回传，普通助手回复的思考过程被丢弃，
+            // 于是只要启用了任何注册工具的自定义 APP（如联网搜索），聊天就必然失败。
+            // 这里对普通助手回复一并回传；shouldEchoReasoningContent 已把范围限制在 DeepSeek 系，
+            // 不会给 OpenAI 官方等不认该字段的渠道带去未知参数。
+            if (message.role === "assistant" && message.reasoning && shouldEchoReasoningContent(config)) {
+                return {
+                    role: "assistant",
+                    content: openAIContent(message.content),
+                    reasoning_content: message.reasoning,
+                };
+            }
             return { role: message.role, content: openAIContent(message.content) };
         }),
         ...buildSamplingBody(preset),
