@@ -153,6 +153,19 @@ export type ApiConfig = {
     enableImageRecognition: boolean;
     enableImageGeneration: boolean;
     preventEmptyGenerateRambling?: boolean;
+    /**
+     * 关闭模型思考模式。开启后按服务商在请求体里显式声明「不思考」：
+     * - OpenAI 兼容（DeepSeek 等）：thinking: { type: "disabled" }
+     * - Gemini：generationConfig.thinkingConfig.thinkingBudget = 0
+     * - Anthropic：本身默认不思考，无需处理
+     *
+     * 用途：DeepSeek 在「思考模式 + 请求带 tools」时，要求历史轮次的 reasoning_content
+     * 全部回传，缺一条就报 400（The `reasoning_content` in the thinking mode must be
+     * passed back to the API）。关掉思考模式可从根本上规避。
+     * 附带好处：思考模式下 temperature / presence_penalty / frequency_penalty 不生效，
+     * 关闭后这些采样参数才会真正起作用。
+     */
+    disableThinking?: boolean;
 };
 
 // --- VoiceApiConfig (migrated from voice-settings.tsx) ---
