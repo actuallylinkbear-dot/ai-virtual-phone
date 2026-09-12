@@ -315,6 +315,21 @@ function asRecord(value: unknown): Record<string, unknown> {
     return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
+/**
+ * 用户显式关闭思考模式时的请求体改写（API 设置里的开关，默认关，不影响既有行为）。
+ *
+ * 背景：DeepSeek 在「思考模式 + 请求携带 tools」时，要求把历史轮次的 reasoning_content
+ * 一并回传，否则返回 400。关掉思考模式即可从根源规避，且能让 temperature 等采样参数生效。
+ *
+ * - OpenAI 兼容（DeepSeek 等）：顶层 thinking: { type: "disabled" }
+ * - Gemini：generationConfig.thinkingConfig.thinkingBudget = 0
+ * - Anthropic：默认不思考，无需处理
+ */
+function applyThinkingDisabled(config: ApiConfig, body: Record<string, unknown>): void {
+    if (config.disableThinking !== true) return;
+    body.thinking = { type: "disabled" };
+}
+
 function shouldStringifyToolSchemaEnums(config: ApiConfig, baseUrl: string): boolean {
     const model = config.defaultModel.toLowerCase();
     const url = baseUrl.toLowerCase();
@@ -522,6 +537,7 @@ function buildOpenAICompatibleRequest(
         }),
         ...buildSamplingBody(preset),
     };
+    applyThinkingDisabled(config, body);
     if (
         options.maxTokens
         && options.maxTokens > 0
@@ -662,6 +678,10 @@ function buildGeminiRequest(
             { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
         ],
     };
+    // 关闭思考模式：Gemini 用 thinkingConfig.thinkingBudget = 0
+    if (config.disableThinking === true) {
+        generationConfig.thinkingConfig = { thinkingBudget: 0 };
+    }
     if (Object.keys(generationConfig).length > 0) body.generationConfig = generationConfig;
     if (systemText) body.systemInstruction = { parts: [{ text: systemText }] };
     if (options.tools?.length) {

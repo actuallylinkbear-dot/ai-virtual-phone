@@ -429,6 +429,25 @@ export function ApiSettings() {
                                             </span>
                                         </div>
 
+                                        <div
+                                            className="ui-toggle-row mt-2 overflow-visible"
+                                            style={{ display: "block", position: "relative", height: "auto", flexShrink: 0, padding: "14px 76px 14px 16px" }}
+                                        >
+                                            <span className="menu-label font-medium">关闭思考模式</span>
+                                            <span className="menu-desc whitespace-normal break-words leading-[1.45]">
+                                                开启后按服务商显式声明「不思考」（DeepSeek/OpenAI 兼容：thinking disabled；Gemini：thinkingBudget 0）。
+                                                DeepSeek 在「思考模式 + 请求带工具」时会要求回传历史 reasoning_content，缺失即报 400，开启本项可规避。
+                                                另外思考模式下温度等采样参数不生效，关闭后才会真正起作用。
+                                                注意：仅对支持该参数的渠道开（DeepSeek 系、部分中转站）；OpenAI 官方等不认该参数的渠道请勿开启，否则会因未知参数报 400。
+                                            </span>
+                                            <span style={{ position: "absolute", top: 0, bottom: 0, right: 16, display: "flex", alignItems: "center" }}>
+                                                <Toggle
+                                                    checked={config.disableThinking === true}
+                                                    onChange={(v) => updateConfig(config.id, { disableThinking: v })}
+                                                />
+                                            </span>
+                                        </div>
+
                                         <div className="ui-toggle-row mt-2">
                                             <span className="menu-label font-medium">启用图像识别</span>
                                             <Toggle checked={config.enableImageRecognition} onChange={(v) => updateConfig(config.id, { enableImageRecognition: v })} />
